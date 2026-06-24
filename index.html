@@ -2,80 +2,68 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AI Bottleneck Diagnostic — Move 4 Deployment</title>
+<title>AI Bottleneck Diagnostic — Research Pipeline (v2)</title>
 <style>
   body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
   h1 { font-size: 24px; }
   h2 { font-size: 18px; margin-top: 36px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
-  pre { background: #f4f4f4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  pre { background: #f4f4f4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; }
   .pass { color: #0a7d2c; font-weight: bold; }
   .fail { color: #b00020; font-weight: bold; }
   code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; }
   .box { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .gate { border-left: 4px solid #ddd; padding: 8px 12px; margin: 8px 0; background: #fafafa; }
+  .gate.pass { border-left-color: #0a7d2c; }
+  .gate.fail { border-left-color: #b00020; }
+  select, input, textarea, button { font-family: inherit; font-size: 14px; }
 </style>
 </head>
 <body>
 
-<h1>AI Bottleneck Diagnostic — Track C</h1>
-<p>This is the live, minimal version of the tool. The diagnostic sentence is produced by a human (per the Move 3 boundary decision below), and saved into a real, row-level-secured Postgres database. Below the tool, this page also documents the 2-user RLS isolation test required for Move 4.</p>
+<h1>AI Bottleneck Diagnostic — Research Pipeline</h1>
+<p>This version generates the diagnosis automatically via an LLM pipeline (no human diagnostician), and runs every candidate sentence through two transparency gates before saving it: an anti-restatement check and an anti-horoscope discrimination check. The original human-diagnostician version is preserved at <code>index.html</code>.</p>
 
 <h2>Run a diagnosis</h2>
 <div class="box">
-  <p>Enter the subject's name and the diagnostic sentence you (the human diagnostician) produced for them. This writes a real row into the live database, scoped to this demo account via row-level security — exactly the same mechanism tested below.</p>
+  <p>Enter the subject's name and a free-text description of what they said about their AI usage blocker. The pipeline extracts their explicit claims, generates a candidate diagnosis sentence, and checks it against both gates before saving.</p>
+
   <label for="subjectName" style="display:block; margin-top:10px; font-weight:bold;">Subject name</label>
   <input id="subjectName" type="text" placeholder="e.g. Dany" style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;">
 
-  <label for="diagnosisText" style="display:block; margin-top:14px; font-weight:bold;">Diagnostic sentence</label>
-  <textarea id="diagnosisText" rows="4" placeholder="I don't think this is really about..." style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;"></textarea>
+  <label for="description" style="display:block; margin-top:14px; font-weight:bold;">Description of what they said</label>
+  <textarea id="description" rows="5" placeholder="Paste or summarize what the subject told you about their AI blocker..." style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;"></textarea>
 
-  <button id="submitBtn" onclick="submitDiagnosis()" style="margin-top:14px; padding:10px 18px; background:#111; color:#fff; border:none; border-radius:6px; cursor:pointer;">Save diagnosis</button>
+  <button id="submitBtn" onclick="submitDiagnosis()" style="margin-top:14px; padding:10px 18px; background:#111; color:#fff; border:none; border-radius:6px; cursor:pointer;">Generate diagnosis</button>
 
   <div id="result" style="margin-top:16px;"></div>
 </div>
 
-<h2>Schema</h2>
-<p>Tables: <code>sessions</code>, <code>interview_transcripts</code>, <code>diagnoses</code>, <code>reactions</code>. The critical diagnosis→outcome link is <code>reactions.diagnosis_id → diagnoses.id</code>. Row-level security is enabled on all four tables, scoped via <code>sessions.user_id = auth.uid()</code> and cascaded through the foreign keys.</p>
-
-<h2>Test 1 — User A inserts a session</h2>
+<h2>Report an outcome</h2>
 <div class="box">
-<p>User A authenticates and creates a session row. The <code>user_id</code> column is auto-populated from their auth token (<code>default auth.uid()</code>), not passed manually.</p>
-<pre>HTTP/1.1 201 Created
-[{"id":"8fdb6e2a-f674-47d6-985a-8315b2a8fb9d",
-  "user_id":"33364945-2d3a-4587-b7c4-8ac532360a35",
-  "subject_name":"Test Subject A",
-  "is_cold_uncoached":false,
-  "created_at":"2026-06-20T12:55:31.701801+00:00"}]</pre>
-<p class="pass">PASS — row created, correctly tagged to User A.</p>
-</div>
+  <p>Once a diagnosis has been shown to the subject, record what actually happened. This feeds the recurring outcome loop — real (diagnosis → outcome) data over time, instead of one-off interviews.</p>
 
-<h2>Test 2 — User B attempts to read all sessions (cross-read attempt)</h2>
-<div class="box">
-<p>User B, a completely separate authenticated account, requests all rows from the <code>sessions</code> table — the same table User A's data lives in.</p>
-<pre>HTTP/1.1 200 OK
-[]</pre>
-<p class="pass">PASS — User B receives an empty array. User A's session is invisible to User B, enforced by Postgres row-level security, not application-level filtering.</p>
-</div>
+  <label for="diagnosisId" style="display:block; margin-top:10px; font-weight:bold;">Diagnosis ID</label>
+  <input id="diagnosisId" type="text" placeholder="paste the diagnosis id shown above" style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;">
 
-<h2>Test 3 — User A reads their own sessions</h2>
-<div class="box">
-<p>Confirms RLS is correctly scoped, not just blocking everyone.</p>
-<pre>HTTP/1.1 200 OK
-[{"id":"42418644-7f74-41aa-87c8-12c0b37e4424", "user_id":"33364945-2d3a-4587-b7c4-8ac532360a35", ...},
- {"id":"8fdb6e2a-f674-47d6-985a-8315b2a8fb9d", "user_id":"33364945-2d3a-4587-b7c4-8ac532360a35", ...}]</pre>
-<p class="pass">PASS — User A correctly sees their own rows.</p>
-</div>
+  <label for="outcomeType" style="display:block; margin-top:14px; font-weight:bold;">What happened</label>
+  <select id="outcomeType" style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;">
+    <option value="unprompted_action">Unprompted action — they did something about it</option>
+    <option value="unprompted_escalation">Unprompted escalation — "how did you know" / "what do I do"</option>
+    <option value="polite_confirmation">Polite confirmation — agreed, but no follow-through</option>
+    <option value="disagreement">Disagreement</option>
+    <option value="no_response">No response</option>
+  </select>
 
-<h2>Verify it yourself</h2>
-<p>This deployment is live. Anyone can reproduce the test above using these read-only credentials and the public anon key (safe to share — it carries no special privileges and RLS applies to every request made with it):</p>
-<div class="box">
-<p><strong>Project URL:</strong> <code>https://fwgaibdemgtczlzxmddd.supabase.co</code></p>
-<p><strong>Anon key:</strong> <code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3Z2FpYmRlbWd0Y3psenhtZGRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5NTE2NzEsImV4cCI6MjA5NzUyNzY3MX0.430zCIH_MmhxOfRcgKCdsm5K1UYQsV7-HAovD-Tengw</code></p>
-<p><strong>Test accounts:</strong> <code>usera@test.com</code> / <code>Test1234!</code> and <code>userb@test.com</code> / <code>Test1234!</code></p>
+  <label for="outcomeText" style="display:block; margin-top:14px; font-weight:bold;">Details</label>
+  <textarea id="outcomeText" rows="3" placeholder="What exactly did they say or do?" style="width:100%; padding:8px; margin-top:4px; box-sizing:border-box;"></textarea>
+
+  <button id="outcomeBtn" onclick="submitOutcome()" style="margin-top:14px; padding:10px 18px; background:#111; color:#fff; border:none; border-radius:6px; cursor:pointer;">Save outcome</button>
+
+  <div id="outcomeResult" style="margin-top:16px;"></div>
 </div>
-<p>Log in as each via <code>POST /auth/v1/token?grant_type=password</code>, then <code>GET /rest/v1/sessions</code> with the resulting bearer token. User B's read will return <code>[]</code>; User A's will return their own rows.</p>
 
 <h2>Repository</h2>
-<p>Full hypothesis, Move 1 and Move 5 records, and schema diagram: see the public GitHub repo linked in the submission form.</p>
+<p>Full hypothesis, Move records, and schema: see the public GitHub repo linked in the submission form.</p>
 
 <script>
 const SUPABASE_URL = "https://fwgaibdemgtczlzxmddd.supabase.co";
@@ -98,19 +86,28 @@ async function getDemoToken() {
   return cachedToken;
 }
 
+function gateHtml(label, gate) {
+  if (!gate) return `<div class="gate">${label}: skipped</div>`;
+  const cls = gate.passed ? "pass" : "fail";
+  return `<div class="gate ${cls}">
+    <strong>${label}: <span class="${cls}">${gate.passed ? "PASS" : "FAIL"}</span></strong>
+    <p style="margin:6px 0 0;">${gate.reasoning}</p>
+  </div>`;
+}
+
 async function submitDiagnosis() {
   const subjectName = document.getElementById("subjectName").value.trim();
-  const diagnosisText = document.getElementById("diagnosisText").value.trim();
+  const description = document.getElementById("description").value.trim();
   const resultDiv = document.getElementById("result");
   const btn = document.getElementById("submitBtn");
 
-  if (!subjectName || !diagnosisText) {
+  if (!subjectName || !description) {
     resultDiv.innerHTML = '<p class="fail">Please fill in both fields.</p>';
     return;
   }
 
   btn.disabled = true;
-  btn.textContent = "Saving...";
+  btn.textContent = "Generating...";
   resultDiv.innerHTML = "";
 
   try {
@@ -131,26 +128,82 @@ async function submitDiagnosis() {
     if (!sessionRes.ok) throw new Error(JSON.stringify(sessionData));
     const sessionId = sessionData[0].id;
 
-    const diagnosisRes = await fetch(`${SUPABASE_URL}/rest/v1/diagnoses`, {
+    const fnRes = await fetch(`${SUPABASE_URL}/functions/v1/generate-diagnosis`, {
       method: "POST",
-      headers,
-      body: JSON.stringify({ session_id: sessionId, sentence_text: diagnosisText })
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, description })
     });
-    const diagnosisData = await diagnosisRes.json();
-    if (!diagnosisRes.ok) throw new Error(JSON.stringify(diagnosisData));
+    const fnData = await fnRes.json();
+    if (!fnRes.ok) throw new Error(fnData.error || JSON.stringify(fnData));
 
     resultDiv.innerHTML = `
-      <p class="pass">Saved successfully.</p>
-      <pre>${JSON.stringify(diagnosisData[0], null, 2)}</pre>
-      <p>This row is now only visible to this demo account, enforced by the row-level security policy demonstrated below.</p>
+      <p class="pass">Generated and saved.</p>
+      <div class="box">
+        <p><strong>Diagnosis:</strong> "${fnData.diagnosis.sentence_text}"</p>
+        <p><strong>Diagnosis ID:</strong> <code>${fnData.diagnosis.id}</code> (copy this to report the outcome later)</p>
+        <p style="font-size:12px; color:#666;">Model: ${fnData.model} · Attempts: ${fnData.attempts}</p>
+      </div>
+      ${gateHtml("Anti-restatement check", fnData.restatement_check)}
+      ${gateHtml("Anti-horoscope discrimination check", fnData.discrimination_check)}
+      <p style="font-size:13px; color:#666; margin-top:10px;">Extracted claims: ${fnData.claims.join(" · ")}</p>
     `;
     document.getElementById("subjectName").value = "";
-    document.getElementById("diagnosisText").value = "";
+    document.getElementById("description").value = "";
   } catch (err) {
     resultDiv.innerHTML = '<p class="fail">Error: ' + err.message + '</p>';
   } finally {
     btn.disabled = false;
-    btn.textContent = "Save diagnosis";
+    btn.textContent = "Generate diagnosis";
+  }
+}
+
+async function submitOutcome() {
+  const diagnosisId = document.getElementById("diagnosisId").value.trim();
+  const outcomeType = document.getElementById("outcomeType").value;
+  const outcomeText = document.getElementById("outcomeText").value.trim();
+  const resultDiv = document.getElementById("outcomeResult");
+  const btn = document.getElementById("outcomeBtn");
+
+  if (!diagnosisId || !outcomeText) {
+    resultDiv.innerHTML = '<p class="fail">Please fill in both the diagnosis ID and details.</p>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  resultDiv.innerHTML = "";
+
+  try {
+    const token = await getDemoToken();
+    const headers = {
+      "apikey": ANON_KEY,
+      "Authorization": "Bearer " + token,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation"
+    };
+
+    const outcomeRes = await fetch(`${SUPABASE_URL}/rest/v1/outcomes`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ diagnosis_id: diagnosisId, outcome_type: outcomeType, outcome_text: outcomeText })
+    });
+    const outcomeData = await outcomeRes.json();
+    if (!outcomeRes.ok) throw new Error(JSON.stringify(outcomeData));
+
+    await fetch(`${SUPABASE_URL}/rest/v1/diagnoses?id=eq.${diagnosisId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ status: "outcome_recorded" })
+    });
+
+    resultDiv.innerHTML = `<p class="pass">Outcome saved.</p><pre>${JSON.stringify(outcomeData[0], null, 2)}</pre>`;
+    document.getElementById("diagnosisId").value = "";
+    document.getElementById("outcomeText").value = "";
+  } catch (err) {
+    resultDiv.innerHTML = '<p class="fail">Error: ' + err.message + '</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save outcome";
   }
 }
 </script>
